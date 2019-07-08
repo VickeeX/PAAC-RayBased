@@ -6,7 +6,7 @@
     Description  :    {TODO}
     Author       :    VickeeX
 """
-import argparse, numpy as np
+import argparse, numpy as np, ray
 
 
 def get_arg_parser():
@@ -70,18 +70,18 @@ if __name__ == "__main__":
     create_environment = lambda i: AtariEmulator.remote(i, args)
 
     emulators = np.asarray([create_environment(i) for i in range(4)])
-    variables = [(np.asarray([emulator.get_initial_state.remote() for emulator in emulators], dtype=np.uint8)),
+    variables = [(np.asarray([ray.get(emulator.get_initial_state.remote()) for emulator in emulators], dtype=np.uint8)),
                  (np.zeros(4, dtype=np.float32)),
                  (np.asarray([False] * 4, dtype=np.float32)),
                  (np.zeros((4, num_actions), dtype=np.float32))]
 
     for step in range(10):
         for i, (emulator, action) in enumerate(zip(emulators, variables[-1])):
-            new_s, reward, episode_over = emulator.next.remote(action)
+            new_s, reward, episode_over = ray.get(emulator.next.remote(action))
             if episode_over:
-                variables[0][i] = emulator.get_initial_state.remote()
+                variables[0][i] = ray.get(emulator.get_initial_state.remote())
             else:
                 variables[0][i] = new_s
             variables[1][i] = reward
             variables[2][i] = episode_over
-        print("get batch data %d." % i)
+        print("get batch data %d." % step)
