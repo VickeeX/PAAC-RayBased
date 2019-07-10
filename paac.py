@@ -7,7 +7,7 @@ import logging
 
 from emulator_runner import EmulatorRunner
 from runners import Runners
-import numpy as np
+import numpy as np, ray
 
 
 class PAACLearner(ActorLearner):
@@ -18,9 +18,9 @@ class PAACLearner(ActorLearner):
     @staticmethod
     def choose_next_actions(network, num_actions, states, session):
         network_output_v, network_output_pi = session.run(
-            [network.output_layer_v,
-             network.output_layer_pi],
-            feed_dict={network.input_ph: states})
+                [network.output_layer_v,
+                 network.output_layer_pi],
+                feed_dict={network.input_ph: states})
 
         action_indices = PAACLearner.__sample_policy_action(network_output_pi)
 
@@ -71,14 +71,16 @@ class PAACLearner(ActorLearner):
         total_rewards = []
 
         # state, reward, episode_over, action
-        variables = [(np.asarray([emulator.get_initial_state() for emulator in self.emulators], dtype=np.uint8)),
+        variables = [(np.asarray([emulator.get_initial_state.remote() for emulator in self.emulators], dtype=np.uint8)),
                      (np.zeros(self.emulator_counts, dtype=np.float32)),
                      (np.asarray([False] * self.emulator_counts, dtype=np.float32)),
                      (np.zeros((self.emulator_counts, self.num_actions), dtype=np.float32))]
 
         self.runners = Runners(EmulatorRunner, self.emulators, self.workers, variables)
         self.runners.start()
-        shared_states, shared_rewards, shared_episode_over, shared_actions = self.runners.get_shared_variables()
+        # TODO: move the data logic code to into Runners
+        # shared_states, shared_rewards, shared_episode_over, shared_actions = self.variables
+        shared_states, shared_rewards, shared_episode_over, shared_actions = variables
 
         summaries_op = tf.summary.merge_all()
 
@@ -112,8 +114,18 @@ class PAACLearner(ActorLearner):
                 states[t] = shared_states
 
                 # Start updating all environments with next_actions
-                self.runners.update_environments()
-                self.runners.wait_updated()
+                # self.runners.update_environments()
+                # self.runners.wait_updated()
+
+                for i, (emulator, action) in enumerate(zip(self.emulators, variables[-1])):
+                    new_s, reward, episode_over = ray.get(emulator.next.remote(action))
+                    if episode_over:
+                        variables[0][i] = ray.get(emulator.get_initial_state.remote())
+                    else:
+                        variables[0][i] = new_s
+                    variables[1][i] = reward
+                    variables[2][i] = episode_over
+                print("get batch data %d." % step)
                 # Done updating all environments, have new states, rewards and is_over
 
                 episodes_over_masks[t] = 1.0 - shared_episode_over.astype(np.float32)
@@ -138,8 +150,8 @@ class PAACLearner(ActorLearner):
                         actions_sum[e] = np.zeros(self.num_actions)
 
             nest_state_value = self.session.run(
-                self.network.output_layer_v,
-                feed_dict={self.network.input_ph: shared_states})
+                    self.network.output_layer_v,
+                    feed_dict={self.network.input_ph: shared_states})
 
             estimated_return = np.copy(nest_state_value)
 
@@ -161,8 +173,8 @@ class PAACLearner(ActorLearner):
                          self.learning_rate: lr}
 
             _, summaries = self.session.run(
-                [self.train_step, summaries_op],
-                feed_dict=feed_dict)
+                    [self.train_step, summaries_op],
+                    feed_dict=feed_dict)
 
             self.summary_writer.add_summary(summaries, self.global_step)
             self.summary_writer.flush()
