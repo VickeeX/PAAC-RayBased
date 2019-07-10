@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+
+"""
+    File name    :    runners
+    Date         :    10/07/2019
+    Description  :    {TODO}
+    Author       :    VickeeX
+"""
 import numpy as np
 from multiprocessing import Queue
 from multiprocessing.sharedctypes import RawArray
@@ -5,17 +13,17 @@ from ctypes import c_uint, c_float, c_double
 
 
 class Runners(object):
-
     NUMPY_TO_C_DTYPE = {np.float32: c_float, np.float64: c_double, np.uint8: c_uint}
 
-    def __init__(self, EmulatorRunner, emulators, workers, variables):
+    def __init__(self, EmulatorRunner, emulators, workers, variables, queue):
         self.variables = [self._get_shared(var) for var in variables]
         self.workers = workers
-        self.queues = [Queue() for _ in range(workers)]
-        self.barrier = Queue()
+        self.queue = queue
+        self.putSignal = [Queue() for _ in range(workers)]
+        self.getSignal = Queue()
 
-        self.runners = [EmulatorRunner(i, emulators, vars, self.queues[i], self.barrier) for i, (emulators, vars) in
-                        enumerate(zip(np.split(emulators, workers), zip(*[np.split(var, workers) for var in self.variables])))]
+        self.runners = [EmulatorRunner(i, emulators, vars, self.putSignal[i], self.getSignal) for i, (emulators, vars)
+                        in enumerate(zip(emulators, zip(*[var for var in self.variables])))]
 
     def _get_shared(self, array):
         """
@@ -34,17 +42,23 @@ class Runners(object):
         for r in self.runners:
             r.start()
 
-    def stop(self):
-        for queue in self.queues:
-            queue.put(None)
+        while True:
+            self.update_environments()
+            self.wait_updated()
+            self.queue.put(self.variables)
 
-    def get_shared_variables(self):
-        return self.variables
+    def stop(self):
+        for q in self.putSignal:
+            q.put(None)
+
+    #
+    # def get_shared_variables(self):
+    #     return self.variables
 
     def update_environments(self):
-        for queue in self.queues:
-            queue.put(True)
+        for q in self.putSignal:
+            q.put(True)
 
     def wait_updated(self):
-        for wd in range(self.workers):
-            self.barrier.get()
+        for _ in range(self.workers):
+            self.getSignal.get()

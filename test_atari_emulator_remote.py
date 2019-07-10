@@ -9,6 +9,16 @@
 import argparse, numpy as np, ray
 
 
+def bool_arg(string):
+    value = string.lower()
+    if value == 'true':
+        return True
+    elif value == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Expected True or False, but got {}".format(string))
+
+
 def get_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('-g', default='pong', help='Name of game', dest='game')
@@ -67,6 +77,11 @@ if __name__ == "__main__":
     ale_int = ALEInterface()
     ale_int.loadROM(str.encode(filename))
     num_actions = len(ale_int.getMinimalActionSet())
+
+    args.num_actions = num_actions
+    args.random_seed = 3
+
+    ray.init()
     create_environment = lambda i: AtariEmulator.remote(i, args)
 
     emulators = np.asarray([create_environment(i) for i in range(4)])
@@ -85,3 +100,4 @@ if __name__ == "__main__":
             variables[1][i] = reward
             variables[2][i] = episode_over
         print("get batch data %d." % step)
+    ray.shutdown()

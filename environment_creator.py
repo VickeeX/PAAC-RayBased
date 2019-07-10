@@ -12,7 +12,7 @@ class EnvironmentCreator(object):
         ale_int = ALEInterface()
         ale_int.loadROM(str.encode(filename))
         self.num_actions = len(ale_int.getMinimalActionSet())
-        self.create_environment = lambda i: AtariEmulator(i, args)
+        self.create_environment = lambda i: AtariEmulator.remote(i, args)
 
 
 
